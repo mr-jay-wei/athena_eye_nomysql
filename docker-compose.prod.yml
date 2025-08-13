@@ -1,0 +1,78 @@
+# athena_eye/docker-compose.prod.yml
+# 专为生产环境设计，移除了本地开发特性（如热加载），增加了前端服务。
+
+services:
+  # --- 数据库服务 (与本地开发基本一致) ---
+  db:
+    image: mysql:8.0
+    container_name: athena_eye_db
+    restart: unless-stopped
+    #env_file: ./.env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      # 在生产环境中，我们依然使用init.sql来初始化用户
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./my.cnf:/etc/mysql/conf.d/low-memory.cnf
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${MYSQL_ROOT_PASSWORD}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 生产环境不应暴露端口到公网，服务间通过内部网络通信
+    # ports:
+    #  - "33060:3306"
+
+  # --- 后端应用服务 (生产环境优化) ---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: athena_eye_backend
+    restart: unless-stopped
+    env_file: ./.env
+    volumes:
+      # 将主机根目录的 .env 文件，挂载到容器内 /app/.env
+      # 这样 find_dotenv() 就能在容器里找到它了
+      - ./.env:/app/.env
+    depends_on:
+      db:
+        condition: service_healthy # 依然依赖数据库健康
+    # 【生产环境核心区别】
+    # 1. 移除 'volumes'：不再将本地代码挂载到容器中。镜像是自包含的、不可变的。
+    # 2. 移除 'ports'：不再直接将8000端口暴露给外界，所有流量都应通过Nginx反向代理。
+    # 3. 修改 'command'：使用更稳定的gunicorn作为WSGI服务器来运行FastAPI应用。
+    command: ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "4", "-b", "0.0.0.0:8000", "athena_eye_project.main_api:app"]
+
+  # --- 【新增】前端与反向代理服务 (Nginx) ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: athena_eye_frontend
+    restart: unless-stopped
+    ports:
+      # 将此容器的80端口，映射到云服务器的80端口（HTTP）
+      - "80:80"
+      # 如果未来配置SSL(HTTPS)，则需要映射443端口
+      # - "443:443"
+    depends_on:
+      # 依赖后端，确保后端启动后前端代理才生效
+      - backend
+
+volumes:
+  db_data:

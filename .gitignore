@@ -1,0 +1,25 @@
+# Environments & Secrets
+.venv
+backend/.venv
+.env
+backend/.env
+.env.*
+
+# Python Caches
+*.pyc
+__pycache__/
+*.egg-info
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# Runtime Generated Files
+logs/
+archive/
+backend/logs/
+backend/archive/
+
+# Frontend Build Artifacts
+frontend/node_modules/
+frontend/dist/

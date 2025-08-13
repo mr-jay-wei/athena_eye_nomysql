@@ -1,0 +1,14 @@
+{
+  "stocks": [
+    {
+      "ticker": "NBIS",
+      "is_active": true,
+      "notes": "生物技术"
+    },
+    {
+      "ticker": "APH",
+      "is_active": true,
+      "notes": "AI基础设施"
+    }
+  ]
+}
