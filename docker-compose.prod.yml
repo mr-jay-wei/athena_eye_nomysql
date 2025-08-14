@@ -50,6 +50,7 @@ services:
       # 这样 find_dotenv() 就能在容器里找到它了
       - ./.env:/app/.env
       - db_data:/app/data
+      - ./backend/athena_eye_project/config:/app/athena_eye_project/config
     # depends_on:
     #   db:
     #     condition: service_healthy # 依然依赖数据库健康

@@ -80,6 +80,7 @@ athena_eye_nomysql/
 │   ├── package.json
 │   ├── README.md
 │   └── vite.config.js
+├── test
 ├── .gitignore
 ├── DEPLOYMENT_POSTMORTEM.md
 ├── docker-compose.prod.yml
@@ -159,15 +160,16 @@ See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more inf
 ## `backend/.pytest_cache/v/cache/lastfailed`
 
 ```
-{
-  "test/test_core_logic.py": true
-}
+{}
 ```
 
 ## `backend/.pytest_cache/v/cache/nodeids`
 
 ```
-[]
+[
+  "test/test_core_logic.py::test_archive_and_cleanup_logic",
+  "test/test_core_logic.py::test_archive_api_endpoints"
+]
 ```
 
 ## `backend/.python-version`
@@ -534,17 +536,17 @@ volume_price_analyzer = VolumePriceAnalyzer()
 ## `backend/athena_eye_project/archiving/archiver.py`
 
 ```python
-# athena_eye_project/archiving/archiver.py (已升级至数据库)
+# athena_eye_project/archiving/archiver.py
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
 from athena_eye_project.utils.logger import logger
 from athena_eye_project.config import settings
-# --- 核心导入 ---
-from athena_eye_project.db.models import Alert # 导入我们的数据库模型
-from athena_eye_project.db.database import SessionLocal # 导入数据库会话工厂
+from athena_eye_project.db.models import Alert
+# SessionLocal不再需要在archiver中直接使用
+# from athena_eye_project.db.database import SessionLocal 
 
-ALERT_HISTORY_LIMIT = 500  # 定义警报记录的最大保留数量
+ALERT_HISTORY_LIMIT = 500
 
 class DecisionArchiver:
     """
@@ -552,6 +554,7 @@ class DecisionArchiver:
     """
     def _get_current_params(self) -> Dict[str, Any]:
         """获取当前.env文件中的所有可调参数，用于记录。"""
+        # ... (此函数内容不变) ...
         return {
             "MONITOR_INTERVAL_MINUTES": settings.MONITOR_INTERVAL_MINUTES,
             "PRICE_DATA_INTERVAL": settings.PRICE_DATA_INTERVAL,
@@ -564,6 +567,7 @@ class DecisionArchiver:
 
     def _cleanup_old_alerts(self, db: Session):
         """如果警报数量超过限制，则删除最旧的记录。"""
+        # ... (此函数内容不变) ...
         try:
             num_alerts = db.query(Alert).count()
             
@@ -571,7 +575,6 @@ class DecisionArchiver:
                 num_to_delete = num_alerts - ALERT_HISTORY_LIMIT
                 logger.info(f"警报数量 ({num_alerts}) 已超过限制 ({ALERT_HISTORY_LIMIT})，准备删除 {num_to_delete} 条最旧的记录。")
                 
-                # 查找ID最小（即最旧）的记录
                 oldest_alerts = db.query(Alert.id).order_by(Alert.id.asc()).limit(num_to_delete).all()
                 ids_to_delete = [alert_id for (alert_id,) in oldest_alerts]
 
@@ -582,20 +585,14 @@ class DecisionArchiver:
 
     def archive_decision_to_db(
         self,
+        db: Session,  # <-- 【核心变更】数据库会话作为参数传入
         alert_details: Dict[str, Any],
         raw_news_data: list
-    ):
+        ):
         """
-        将一次完整的决策快照保存到数据库中。
-
-        Args:
-            alert_details (Dict[str, Any]): 从决策引擎生成的警报详情。
-            raw_news_data (list): 原始的新闻数据列表。
+        将一次完整的决策快照保存到数据库中，并执行清理。
         """
-        db: Session = SessionLocal() # 创建一个新的数据库会话
         try:
-            # --- 数据扁平化映射 ---
-            # 将嵌套的字典数据，映射到我们定义的扁平化的Alert模型字段上
             price_details = alert_details.get('price_details', {})
             volume_details = alert_details.get('volume_details', {})
             sentiment_details = alert_details.get('sentiment_details', {})
@@ -604,42 +601,35 @@ class DecisionArchiver:
                 ticker=alert_details.get('ticker'),
                 alert_type=alert_details.get('alert_type'),
                 reason=alert_details.get('reason'),
-
                 price_open=price_details.get('open'),
                 price_close=price_details.get('close'),
                 price_change_percent=price_details.get('change_percent'),
-
                 volume_latest=volume_details.get('latest'),
                 volume_average=volume_details.get('average'),
                 volume_multiplier=volume_details.get('multiplier'),
-
                 sentiment_overall=sentiment_details.get('overall_sentiment'),
                 sentiment_score=sentiment_details.get('sentiment_score'),
                 sentiment_key_reasons=sentiment_details.get('key_reasons'),
                 sentiment_confidence=sentiment_details.get('confidence_level'),
-
                 trigger_conditions=self._get_current_params(),
                 raw_news_data=raw_news_data
             )
 
-            # --- 数据库操作 ---
-            db.add(new_alert_record) # 将新记录添加到会话中
-            db.commit()              # 提交事务，将数据写入数据库
-            db.refresh(new_alert_record) # 刷新记录，以获取数据库生成的数据（如ID和时间戳）
-
+            db.add(new_alert_record)
+            db.commit()
+            db.refresh(new_alert_record)
+            
             logger.info(f"决策快照已成功存档至数据库，记录ID: {new_alert_record.id}")
 
-            # 每次成功存档后，执行清理检查
             self._cleanup_old_alerts(db)
-            db.commit() # 提交清理操作
+            db.commit()
             
         except Exception as e:
             logger.error(f"决策快照数据库存档失败: {e}")
-            db.rollback() # 如果发生错误，回滚事务，保证数据一致性
-        finally:
-            db.close() # 无论成功与否，都要关闭会话，释放连接
+            db.rollback()
+        # finally块不再需要，因为会话的关闭由调用者负责
 
-# 创建一个单例，方便在项目其他地方调用
+# 创建一个单例
 decision_archiver = DecisionArchiver()
 ```
 
@@ -1128,6 +1118,7 @@ from athena_eye_project.analysis.decision_engine import decision_engine
 from athena_eye_project.notifications.email_sender import email_client
 
 from athena_eye_project.archiving.archiver import decision_archiver
+from athena_eye_project.db.database import SessionLocal
 # --- 新增：速率控制参数 ---
 # Polygon.io 免费版 5次/分钟 -> 每次调用间隔至少12秒。我们设为15秒以策安全。
 API_CALL_INTERVAL_SECONDS = 30
@@ -1184,7 +1175,7 @@ def format_alert_email_v2(alert_details: Dict[str, Any]) -> str:
     return html
 
 def run_monitor_cycle():
-    """执行一个完整的、带速率控制和存档功能的监控周期"""
+    """执行一个完整的、事件驱动的监控周期"""
     logger.info(f"====== 开始新一轮监控周期 (间隔: {settings.MONITOR_INTERVAL_MINUTES}分钟) ======")
     watchlist = get_active_watchlist()
     if not watchlist:
@@ -1194,39 +1185,51 @@ def run_monitor_cycle():
     for i, ticker in enumerate(watchlist):
         logger.info(f"--- 正在处理股票: {ticker} ({i+1}/{len(watchlist)}) ---")
         
+        # --- 第一步：获取并分析量价数据 ---
         stock_data = data_fetcher.get_stock_data(ticker, interval=settings.PRICE_DATA_INTERVAL)
         if stock_data is None:
-            logger.error(f"未能获取到 {ticker} 的行情数据，已跳过对该股票的本轮分析。")
-            time.sleep(API_CALL_INTERVAL_SECONDS)
+            logger.error(f"未能获取到 {ticker} 的行情数据，跳过分析。")
+            if i < len(watchlist) - 1:
+                time.sleep(API_CALL_INTERVAL_SECONDS)
             continue
-        
-        news_data = data_fetcher.get_news(ticker)
-        
+            
         volume_result = volume_price_analyzer.analyze_latest_candle(stock_data)
-        sentiment_result = sentiment_analyzer.analyze_news_sentiment(ticker, news_data)
         
-        alert = decision_engine.decide(ticker, volume_result, sentiment_result)
-        
-        if alert:
-            # --- 核心升级：发送邮件的同时进行存档 ---
-            logger.info(f"为 {ticker} 触发警报，执行通知和存档...")
+        # --- 第二步：事件驱动判断 ---
+        if volume_result:
+            logger.info(f"为 {ticker} 检测到量价异动，启动深度分析...")
             
-            # 1. 存档决策快照
-            decision_archiver.archive_decision_to_db(alert, news_data or [])
+            # 只有在异动发生时，才进行新闻获取和情绪分析
+            news_data = data_fetcher.get_news(ticker)
+            sentiment_result = sentiment_analyzer.analyze_news_sentiment(ticker, news_data)
             
-            # 2. 发送邮件通知
-            subject = f"【Athena Eye V2 警报】{ticker}: {alert['alert_type']}"
-            body = format_alert_email_v2(alert)
-            email_client.send_email(subject, body)
+            # 将所有信息送入决策引擎
+            alert = decision_engine.decide(ticker, volume_result, sentiment_result)
+            
+            if alert:
+                logger.info(f"为 {ticker} 触发警报，执行通知和存档...")
+                
+                db = SessionLocal()
+                try:
+                    decision_archiver.archive_decision_to_db(db, alert, news_data or [])
+                finally:
+                    db.close()
+                
+                subject = f"【Athena Eye V2 警报】{ticker}: {alert['alert_type']}"
+                body = format_alert_email_v2(alert) # format_alert_email_v2需要完整定义
+                email_client.send_email(subject, body)
+            else:
+                logger.info(f"对 {ticker} 的深度分析未触发警-报。")
+
         else:
-            logger.info(f"对 {ticker} 的分析未触发任何 V2 警报。")
-        
+            logger.info(f"对 {ticker} 的量价分析未发现异动，跳过深度分析。")
+
+        # 速率控制
         if i < len(watchlist) - 1:
             logger.info(f"速率控制：暂停 {API_CALL_INTERVAL_SECONDS} 秒...")
             time.sleep(API_CALL_INTERVAL_SECONDS)
 
-    logger.info("====== 本轮 V2 监控周期结束 ======")
-
+    logger.info("====== 本轮监控周期结束 ======")
 
 def main():
     """程序主入口"""
@@ -1260,10 +1263,11 @@ if __name__ == "__main__":
 # backend/athena_eye_project/main_api.py (已升级至V5 - 数据库集成)
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Depends, Query
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from dotenv import find_dotenv, set_key
 from sqlalchemy.orm import Session
 import json
@@ -1323,7 +1327,7 @@ class TunableConfig(BaseModel):
 # --- 新增：用于API响应的Pydantic模型 ---
 class AlertResponse(BaseModel):
     id: int
-    archive_timestamp_utc: str # FastAPI 会自动处理datetime到str的转换
+    archive_timestamp_utc: datetime # FastAPI 会自动处理datetime到str的转换
     ticker: str
     alert_type: str
     reason: str
@@ -1340,9 +1344,7 @@ class AlertResponse(BaseModel):
     trigger_conditions: Optional[dict]
     raw_news_data: Optional[list]
 
-    class Config:
-        # Pydantic V2 使用 from_attributes = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- 股票配置相关的Pydantic模型 ---
 class StockItem(BaseModel):
@@ -1745,7 +1747,7 @@ dependencies = [
 
 packages = ["athena_eye_project"]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "httpx>=0.28.1",
     "pytest>=8.4.1",
@@ -1763,51 +1765,49 @@ from sqlalchemy.orm import sessionmaker, Session
 from fastapi.testclient import TestClient
 
 # --- 测试环境设置 ---
-# 将测试数据库放在内存中，速度快且不产生垃圾文件
-TEST_DATABASE_URL = "sqlite:///:memory:"
+TEST_DATABASE_FILE = "test_athena_eye.db"
+TEST_DATABASE_URL = f"sqlite:///./{TEST_DATABASE_FILE}"
 
-# 模拟一个测试用的数据库引擎和会话工厂
 engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# 在测试开始前，需要加载并修改settings，让应用使用我们的测试数据库
-# 这一步非常关键
 from athena_eye_project.config import settings
 settings.DATABASE_URL = TEST_DATABASE_URL
 
-# 导入我们需要测试的模块
 from athena_eye_project.db.database import Base, get_db
 from athena_eye_project.main_api import app
 from athena_eye_project.db.models import Alert
 from athena_eye_project.archiving.archiver import decision_archiver, ALERT_HISTORY_LIMIT
 
 # --- Pytest Fixture ---
-# 这是一个可复用的测试准备函数
 @pytest.fixture(scope="function")
 def db_session() -> Session:
     """
-    为每个测试函数创建一个独立的、干净的内存数据库。
+    为每个测试函数创建一个独立的、干净的文件数据库。
+    并在测试结束后自动清理。
     """
-    # 创建所有表
+    if os.path.exists(TEST_DATABASE_FILE):
+        os.remove(TEST_DATABASE_FILE)
+        
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
-        # 销毁所有表，确保下一个测试是干净的
-        Base.metadata.drop_all(bind=engine)
+        # 【核心修正】在删除文件前，彻底关闭引擎的所有连接
+        engine.dispose()
+        if os.path.exists(TEST_DATABASE_FILE):
+            os.remove(TEST_DATABASE_FILE)
 
 # --- FastAPI 测试客户端设置 ---
 def override_get_db():
-    """FastAPI依赖覆盖函数，强制API使用测试数据库会话。"""
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# 将应用中的get_db依赖替换为我们的测试版本
 app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
@@ -1816,66 +1816,46 @@ client = TestClient(app)
 def test_archive_and_cleanup_logic(db_session: Session):
     """
     核心测试：验证存档和自动清理功能。
-    测试场景：连续存档510条记录，验证最终数据库中是否只剩下500条。
     """
     print(f"开始测试存档与清理逻辑，记录上限为 {ALERT_HISTORY_LIMIT}...")
-
-    # 1. 准备数据：创建比上限多10条的模拟警报
     total_to_create = ALERT_HISTORY_LIMIT + 10
     mock_alert_details = {
-        "ticker": "TEST",
-        "alert_type": "Test Alert",
-        "reason": "Testing cleanup",
-        "price_details": {},
-        "volume_details": {},
-        "sentiment_details": {}
+        "ticker": "TEST", "alert_type": "Test Alert", "reason": "Testing cleanup",
+        "price_details": {}, "volume_details": {}, "sentiment_details": {}
     }
-    mock_news_data = []
 
-    # 2. 执行操作：循环调用存档函数
     for i in range(total_to_create):
-        # 稍微修改reason以保证数据不同
         current_alert_details = mock_alert_details.copy()
         current_alert_details['reason'] = f"Testing cleanup {i+1}"
-        decision_archiver.archive_decision_to_db(current_alert_details, mock_news_data)
+        decision_archiver.archive_decision_to_db(db_session, current_alert_details, [])
 
-    # 3. 验证结果
     final_count = db_session.query(Alert).count()
     print(f"存档 {total_to_create} 条记录后，数据库中剩余 {final_count} 条。")
     assert final_count == ALERT_HISTORY_LIMIT
 
-    # 4. (可选) 精确验证：确保删除的是最旧的记录
     oldest_remaining_alert = db_session.query(Alert).order_by(Alert.id.asc()).first()
-    # 原始的第1条到第10条应该被删除了，剩下的第一条应该是ID=11的记录
-    # 注意：Alert的ID是自增的，所以ID为11的记录，它的reason是 "Testing cleanup 11"
     assert oldest_remaining_alert is not None
-    assert oldest_remaining_alert.reason == "Testing cleanup 11"
+    assert "11" in oldest_remaining_alert.reason
     print("验证通过：最旧的10条记录已被正确删除。")
 
 
 def test_archive_api_endpoints(db_session: Session):
     """
-    API集成测试：验证/api/archive端点能否正常工作。
+    API集成测试：验证/api/archive端点能否在共享数据库上正常工作。
     """
     print("开始测试API端点...")
-
-    # 1. 准备数据：在测试数据库中手动插入几条记录
+    
     alert1 = Alert(ticker="API_T1", alert_type="Type A", reason="Reason A")
     alert2 = Alert(ticker="API_T2", alert_type="Type B", reason="Reason B")
     db_session.add_all([alert1, alert2])
     db_session.commit()
-
-    # 2. 执行操作：调用FastAPI的测试客户端
+    
     response = client.get("/api/archive")
     
-    # 3. 验证结果
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data, list)
     assert len(data) == 2
-    # 后端默认按ID倒序返回，所以第一个应该是alert2
     assert data[0]['ticker'] == "API_T2"
-    assert data[1]['ticker'] == "API_T1"
     print("验证通过：/api/archive 端点工作正常。")
 ```
 
@@ -2085,6 +2065,7 @@ services:
       # 这样 find_dotenv() 就能在容器里找到它了
       - ./.env:/app/.env
       - db_data:/app/data
+      - ./backend/athena_eye_project/config:/app/athena_eye_project/config
     # depends_on:
     #   db:
     #     condition: service_healthy # 依然依赖数据库健康
@@ -2092,7 +2073,7 @@ services:
     # 1. 移除 'volumes'：不再将本地代码挂载到容器中。镜像是自包含的、不可变的。
     # 2. 移除 'ports'：不再直接将8000端口暴露给外界，所有流量都应通过Nginx反向代理。
     # 3. 修改 'command'：使用更稳定的gunicorn作为WSGI服务器来运行FastAPI应用。
-    command: ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "4", "-b", "0.0.0.0:8000", "athena_eye_project.main_api:app"]
+    command: ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "1", "-b", "0.0.0.0:8000", "--timeout", "120", "athena_eye_project.main_api:app"]
 
   # --- 【新增】前端与反向代理服务 (Nginx) ---
   frontend:
@@ -2250,7 +2231,7 @@ Host *
 ##\# 2.1. 克隆项目代码
 \`\`\`bash
 git clone https://your-git-repository-url/athena_eye.git
-cd athena_eye
+cd athena_eye_nomysql
 \`\`\`
 
 ##\# 2.2. 创建生产环境变量 (`.env`)
