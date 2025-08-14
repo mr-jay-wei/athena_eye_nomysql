@@ -3,36 +3,36 @@
 
 services:
   # --- 数据库服务 (与本地开发基本一致) ---
-  db:
-    image: mysql:8.0
-    container_name: athena_eye_db
-    restart: unless-stopped
-    #env_file: ./.env
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    volumes:
-      - db_data:/var/lib/mysql
-      # 在生产环境中，我们依然使用init.sql来初始化用户
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-      - ./my.cnf:/etc/mysql/conf.d/low-memory.cnf
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "localhost",
-          "-u",
-          "root",
-          "-p${MYSQL_ROOT_PASSWORD}",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # db:
+  #   image: mysql:8.0
+  #   container_name: athena_eye_db
+  #   restart: unless-stopped
+  #   #env_file: ./.env
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+  #     MYSQL_DATABASE: ${MYSQL_DATABASE}
+  #     MYSQL_USER: ${MYSQL_USER}
+  #     MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+  #   volumes:
+  #     - db_data:/var/lib/mysql
+  #     # 在生产环境中，我们依然使用init.sql来初始化用户
+  #     - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+  #     - ./my.cnf:/etc/mysql/conf.d/low-memory.cnf
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "mysqladmin",
+  #         "ping",
+  #         "-h",
+  #         "localhost",
+  #         "-u",
+  #         "root",
+  #         "-p${MYSQL_ROOT_PASSWORD}",
+  #       ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
     # 生产环境不应暴露端口到公网，服务间通过内部网络通信
     # ports:
     #  - "33060:3306"
@@ -49,9 +49,10 @@ services:
       # 将主机根目录的 .env 文件，挂载到容器内 /app/.env
       # 这样 find_dotenv() 就能在容器里找到它了
       - ./.env:/app/.env
-    depends_on:
-      db:
-        condition: service_healthy # 依然依赖数据库健康
+      - db_data:/app/data
+    # depends_on:
+    #   db:
+    #     condition: service_healthy # 依然依赖数据库健康
     # 【生产环境核心区别】
     # 1. 移除 'volumes'：不再将本地代码挂载到容器中。镜像是自包含的、不可变的。
     # 2. 移除 'ports'：不再直接将8000端口暴露给外界，所有流量都应通过Nginx反向代理。

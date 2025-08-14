@@ -19,6 +19,7 @@ logs/
 archive/
 backend/logs/
 backend/archive/
+backend/data/
 
 # Frontend Build Artifacts
 frontend/node_modules/

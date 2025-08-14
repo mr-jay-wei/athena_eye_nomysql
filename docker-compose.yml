@@ -1,36 +1,36 @@
 # athena_eye/docker-compose.yml (最终本地开发版 - 安全且可靠)
 services:
-  db:
-    image: mysql:8.0
-    container_name: athena_eye_db
-    restart: unless-stopped
-    # 【核心修改】我们让db服务也从.env读取变量
-    # env_file:
-    #   - ./.env
-    # 【安全加固】同时在environment中明确引用，这是最稳妥的方式
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-    ports:
-      - "33060:3306"
-    volumes:
-      - db_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "localhost",
-          "-u",
-          "root",
-          "-p${MYSQL_ROOT_PASSWORD}",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # db:
+  #   image: mysql:8.0
+  #   container_name: athena_eye_db
+  #   restart: unless-stopped
+  #   # 【核心修改】我们让db服务也从.env读取变量
+  #   # env_file:
+  #   #   - ./.env
+  #   # 【安全加固】同时在environment中明确引用，这是最稳妥的方式
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+  #     MYSQL_DATABASE: ${MYSQL_DATABASE}
+  #   ports:
+  #     - "33060:3306"
+  #   volumes:
+  #     - db_data:/var/lib/mysql
+  #     - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "mysqladmin",
+  #         "ping",
+  #         "-h",
+  #         "localhost",
+  #         "-u",
+  #         "root",
+  #         "-p${MYSQL_ROOT_PASSWORD}",
+  #       ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
   backend:
     build:
@@ -48,8 +48,8 @@ services:
     volumes:
       - ./backend:/app
       - ./.env:/app/.env
-    depends_on:
-      db:
-        condition: service_healthy
-volumes:
-  db_data:
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+# volumes:
+#   db_data:
