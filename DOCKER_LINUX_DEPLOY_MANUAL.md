@@ -70,7 +70,7 @@ Host *
 ### 2.1. 克隆项目代码
 ```bash
 git clone https://your-git-repository-url/athena_eye.git
-cd athena_eye
+cd athena_eye_nomysql
 ```
 
 ### 2.2. 创建生产环境变量 (`.env`)
