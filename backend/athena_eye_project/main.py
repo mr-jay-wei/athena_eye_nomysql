@@ -70,7 +70,7 @@ def format_alert_email_v2(alert_details: Dict[str, Any]) -> str:
     return html
 
 def run_monitor_cycle():
-    """执行一个完整的、带速率控制和存档功能的监控周期"""
+    """执行一个完整的、事件驱动的监控周期"""
     logger.info(f"====== 开始新一轮监控周期 (间隔: {settings.MONITOR_INTERVAL_MINUTES}分钟) ======")
     watchlist = get_active_watchlist()
     if not watchlist:
@@ -80,40 +80,51 @@ def run_monitor_cycle():
     for i, ticker in enumerate(watchlist):
         logger.info(f"--- 正在处理股票: {ticker} ({i+1}/{len(watchlist)}) ---")
         
+        # --- 第一步：获取并分析量价数据 ---
         stock_data = data_fetcher.get_stock_data(ticker, interval=settings.PRICE_DATA_INTERVAL)
         if stock_data is None:
-            logger.error(f"未能获取到 {ticker} 的行情数据，已跳过对该股票的本轮分析。")
-            time.sleep(API_CALL_INTERVAL_SECONDS)
+            logger.error(f"未能获取到 {ticker} 的行情数据，跳过分析。")
+            if i < len(watchlist) - 1:
+                time.sleep(API_CALL_INTERVAL_SECONDS)
             continue
-        
-        news_data = data_fetcher.get_news(ticker)
-        
+            
         volume_result = volume_price_analyzer.analyze_latest_candle(stock_data)
-        sentiment_result = sentiment_analyzer.analyze_news_sentiment(ticker, news_data)
         
-        alert = decision_engine.decide(ticker, volume_result, sentiment_result)
-        
-        if alert:
-            logger.info(f"为 {ticker} 触发警报，执行通知和存档...")
+        # --- 第二步：事件驱动判断 ---
+        if volume_result:
+            logger.info(f"为 {ticker} 检测到量价异动，启动深度分析...")
             
-            # 【核心变更】创建一个会话，并将其传递给存档器
-            db = SessionLocal()
-            try:
-                decision_archiver.archive_decision_to_db(db, alert, news_data or [])
-            finally:
-                db.close() # 确保会话被关闭
+            # 只有在异动发生时，才进行新闻获取和情绪分析
+            news_data = data_fetcher.get_news(ticker)
+            sentiment_result = sentiment_analyzer.analyze_news_sentiment(ticker, news_data)
             
-            subject = f"【Athena Eye V2 警报】{ticker}: {alert['alert_type']}"
-            body = format_alert_email_v2(alert)
-            email_client.send_email(subject, body)
+            # 将所有信息送入决策引擎
+            alert = decision_engine.decide(ticker, volume_result, sentiment_result)
+            
+            if alert:
+                logger.info(f"为 {ticker} 触发警报，执行通知和存档...")
+                
+                db = SessionLocal()
+                try:
+                    decision_archiver.archive_decision_to_db(db, alert, news_data or [])
+                finally:
+                    db.close()
+                
+                subject = f"【Athena Eye V2 警报】{ticker}: {alert['alert_type']}"
+                body = format_alert_email_v2(alert) # format_alert_email_v2需要完整定义
+                email_client.send_email(subject, body)
+            else:
+                logger.info(f"对 {ticker} 的深度分析未触发警-报。")
+
         else:
-            logger.info(f"对 {ticker} 的分析未触发任何 V2 警报。")
-        
+            logger.info(f"对 {ticker} 的量价分析未发现异动，跳过深度分析。")
+
+        # 速率控制
         if i < len(watchlist) - 1:
             logger.info(f"速率控制：暂停 {API_CALL_INTERVAL_SECONDS} 秒...")
             time.sleep(API_CALL_INTERVAL_SECONDS)
 
-    logger.info("====== 本轮 V2 监控周期结束 ======")
+    logger.info("====== 本轮监控周期结束 ======")
 
 def main():
     """程序主入口"""
