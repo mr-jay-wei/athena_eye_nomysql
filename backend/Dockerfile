@@ -32,7 +32,7 @@
         rm -rf /var/lib/apt/lists/*
     
     RUN mkdir logs
-    
+    RUN mkdir /app/data
     # --- 暴露端口 ---
     EXPOSE 8000
     

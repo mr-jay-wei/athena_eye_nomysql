@@ -26,19 +26,9 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
-# === 新增：数据库配置 ===
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", 3306))
-DB_USER = os.getenv("MYSQL_USER")
-DB_PASSWORD = os.getenv("MYSQL_PASSWORD")
-DB_NAME = os.getenv("MYSQL_DATABASE")
-
-# 构建SQLAlchemy数据库连接URL
-# 开发环境使用SQLite，生产环境使用MySQL
-if os.getenv("ENVIRONMENT", "development") == "development":
-    DATABASE_URL = "sqlite:///./athena_eye.db"
-else:
-    DATABASE_URL = f"mysql+mysqlconnector://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# === 数据库配置 (统一使用SQLite) ===
+# 数据库文件将被放置在 /app/data/ 目录下，该目录在生产环境中会被持久化。
+DATABASE_URL = "sqlite:///data/athena_eye.db"
 
 # === 用户可调参数 (Tuning) ===
 MONITOR_INTERVAL_MINUTES = int(os.getenv("MONITOR_INTERVAL_MINUTES", 15))
@@ -57,14 +47,6 @@ def validate_config():
         "RECIPIENT_EMAIL": RECIPIENT_EMAIL,
     }
     
-    # 生产环境需要MySQL配置
-    if os.getenv("ENVIRONMENT", "development") != "development":
-        required_vars.update({
-            "MYSQL_USER": DB_USER,
-            "MYSQL_PASSWORD": DB_PASSWORD,
-            "MYSQL_DATABASE": DB_NAME,
-        })
-
     missing_vars = [key for key, value in required_vars.items() if not value]
     if missing_vars:
         raise ValueError(f"错误：缺少必要的配置: {', '.join(missing_vars)}. 请检查 .env 文件。")

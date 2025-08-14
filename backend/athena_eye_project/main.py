@@ -13,6 +13,7 @@ from athena_eye_project.analysis.decision_engine import decision_engine
 from athena_eye_project.notifications.email_sender import email_client
 
 from athena_eye_project.archiving.archiver import decision_archiver
+from athena_eye_project.db.database import SessionLocal
 # --- 新增：速率控制参数 ---
 # Polygon.io 免费版 5次/分钟 -> 每次调用间隔至少12秒。我们设为15秒以策安全。
 API_CALL_INTERVAL_SECONDS = 30
@@ -93,13 +94,15 @@ def run_monitor_cycle():
         alert = decision_engine.decide(ticker, volume_result, sentiment_result)
         
         if alert:
-            # --- 核心升级：发送邮件的同时进行存档 ---
             logger.info(f"为 {ticker} 触发警报，执行通知和存档...")
             
-            # 1. 存档决策快照
-            decision_archiver.archive_decision_to_db(alert, news_data or [])
+            # 【核心变更】创建一个会话，并将其传递给存档器
+            db = SessionLocal()
+            try:
+                decision_archiver.archive_decision_to_db(db, alert, news_data or [])
+            finally:
+                db.close() # 确保会话被关闭
             
-            # 2. 发送邮件通知
             subject = f"【Athena Eye V2 警报】{ticker}: {alert['alert_type']}"
             body = format_alert_email_v2(alert)
             email_client.send_email(subject, body)
@@ -111,7 +114,6 @@ def run_monitor_cycle():
             time.sleep(API_CALL_INTERVAL_SECONDS)
 
     logger.info("====== 本轮 V2 监控周期结束 ======")
-
 
 def main():
     """程序主入口"""

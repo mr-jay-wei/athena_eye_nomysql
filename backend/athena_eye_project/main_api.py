@@ -1,10 +1,11 @@
 # backend/athena_eye_project/main_api.py (已升级至V5 - 数据库集成)
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Depends, Query
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from dotenv import find_dotenv, set_key
 from sqlalchemy.orm import Session
 import json
@@ -64,7 +65,7 @@ class TunableConfig(BaseModel):
 # --- 新增：用于API响应的Pydantic模型 ---
 class AlertResponse(BaseModel):
     id: int
-    archive_timestamp_utc: str # FastAPI 会自动处理datetime到str的转换
+    archive_timestamp_utc: datetime # FastAPI 会自动处理datetime到str的转换
     ticker: str
     alert_type: str
     reason: str
@@ -81,9 +82,7 @@ class AlertResponse(BaseModel):
     trigger_conditions: Optional[dict]
     raw_news_data: Optional[list]
 
-    class Config:
-        # Pydantic V2 使用 from_attributes = True
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- 股票配置相关的Pydantic模型 ---
 class StockItem(BaseModel):
