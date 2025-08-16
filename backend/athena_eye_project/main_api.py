@@ -53,7 +53,7 @@ app = FastAPI(
 
 # --- Pydantic 模型 ---
 class TunableConfig(BaseModel):
-    # ... (这部分模型不变) ...
+    # 监控参数
     MONITOR_INTERVAL_MINUTES: int = Field(..., gt=0, description="监控频率（分钟）")
     PRICE_DATA_INTERVAL: str = Field(..., description="K线周期 (e.g., '15min')")
     VOLUME_LOOKBACK_PERIOD: int = Field(..., gt=0, description="成交量回看期")
@@ -61,6 +61,21 @@ class TunableConfig(BaseModel):
     PRICE_SIGNIFICANT_CHANGE_PERCENT: float = Field(..., ge=0, description="显著价格变化百分比")
     SENTIMENT_SCORE_THRESHOLD: int = Field(..., ge=1, le=9, description="情绪评分阈值")
     NEWS_FETCH_COUNT: int = Field(..., gt=0, le=100, description="新闻获取数量")
+    
+    # 邮件配置
+    SENDER_EMAIL: str = Field(..., description="发件人邮箱")
+    EMAIL_APP_PASSWORD: str = Field(..., description="邮箱授权码")
+    RECIPIENT_EMAIL: str = Field(..., description="收件人邮箱")
+    SMTP_SERVER: str = Field(default="smtp.qq.com", description="SMTP服务器")
+    SMTP_PORT: int = Field(default=587, description="SMTP端口")
+    
+    # LLM配置
+    OPENROUTER_API_KEY: str = Field(..., description="OpenRouter API密钥")
+    OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter API基础URL")
+    OPENROUTER_MODEL_NAME: str = Field(..., description="使用的模型名称")
+    
+    # API配置
+    POLYGON_API_KEY: str = Field(..., description="Polygon.io API密钥")
 
 # --- 新增：用于API响应的Pydantic模型 ---
 class AlertResponse(BaseModel):
@@ -147,20 +162,44 @@ def get_config() -> TunableConfig:
         VOLUME_SPIKE_MULTIPLIER=settings.VOLUME_SPIKE_MULTIPLIER,
         PRICE_SIGNIFICANT_CHANGE_PERCENT=settings.PRICE_SIGNIFICANT_CHANGE_PERCENT,
         SENTIMENT_SCORE_THRESHOLD=settings.SENTIMENT_SCORE_THRESHOLD,
-        NEWS_FETCH_COUNT=settings.NEWS_FETCH_COUNT
+        NEWS_FETCH_COUNT=settings.NEWS_FETCH_COUNT,
+        SENDER_EMAIL=settings.SENDER_EMAIL or "",
+        EMAIL_APP_PASSWORD=settings.EMAIL_APP_PASSWORD or "",
+        RECIPIENT_EMAIL=settings.RECIPIENT_EMAIL or "",
+        SMTP_SERVER=settings.SMTP_SERVER,
+        SMTP_PORT=settings.SMTP_PORT,
+        OPENROUTER_API_KEY=settings.API_KEY or "",
+        OPENROUTER_BASE_URL=settings.BASE_URL,
+        OPENROUTER_MODEL_NAME=settings.MODEL_NAME or "",
+        POLYGON_API_KEY=settings.POLYGON_API_KEY or ""
     )
 
 @app.post("/api/config", response_model=TunableConfig, tags=["Configuration"])
 def update_config(config: TunableConfig) -> TunableConfig:
     """更新.env文件中的可调参数。"""
-    logger.info(f"更新系统配置请求: {config.model_dump_json()}")
+    logger.info(f"更新系统配置请求")
     try:
         dotenv_path = find_dotenv()
         if not dotenv_path:
-            raise HTTPException(status_code=500, detail=".env file not found.")
-        for key, value in config.model_dump().items():
+            # 如果找不到.env文件，创建一个
+            dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+            logger.info(f"创建新的.env文件: {dotenv_path}")
+        
+        # 更新所有配置项
+        config_dict = config.model_dump()
+        for key, value in config_dict.items():
             set_key(dotenv_path, key, str(value))
-        logger.info(".env文件更新成功。")
+        
+        # 重新加载环境变量以确保立即生效
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path, override=True)
+        
+        # 更新settings模块中的变量
+        import importlib
+        from athena_eye_project.config import settings
+        importlib.reload(settings)
+        
+        logger.info(".env文件更新成功，配置已重新加载。")
         return config
     except Exception as e:
         logger.error(f"更新.env文件时出错: {e}")

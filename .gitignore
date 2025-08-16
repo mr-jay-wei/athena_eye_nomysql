@@ -16,10 +16,12 @@ __pycache__/
 
 # Runtime Generated Files
 logs/
+test/
 archive/
 backend/logs/
 backend/archive/
 backend/data/
+frontend/logs/
 
 # Frontend Build Artifacts
 frontend/node_modules/

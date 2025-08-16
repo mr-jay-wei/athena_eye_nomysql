@@ -18,16 +18,20 @@ from athena_eye_project.db.database import SessionLocal
 # Polygon.io 免费版 5次/分钟 -> 每次调用间隔至少12秒。我们设为15秒以策安全。
 API_CALL_INTERVAL_SECONDS = 30
 
-def format_alert_email_v2(alert_details: Dict[str, Any]) -> str:
-    # ... (此函数内容完全不变)
+def format_alert_email_v3(alert_details: Dict[str, Any]) -> str:
+    """格式化V3版本的警报邮件（基于股价变动触发）"""
     ticker = alert_details['ticker']
     alert_type = alert_details['alert_type']
     color = "#D23F31"
-    if "看涨" in alert_type or "机会" in alert_type:
+    if "看涨" in alert_type or "机会" in alert_type or "上涨" in alert_type:
         color = "#28a745"
+    elif "下跌" in alert_type or "看跌" in alert_type:
+        color = "#dc3545"
+    
     sentiment_details = alert_details.get('sentiment_details', {})
     price_details = alert_details.get('price_details', {})
     volume_details = alert_details.get('volume_details', {})
+    
     html = f"""
     <html><head><style>
         body {{ font-family: 'Segoe UI', sans-serif; margin: 20px; color: #333; background-color: #f4f7f6; }}
@@ -43,19 +47,22 @@ def format_alert_email_v2(alert_details: Dict[str, Any]) -> str:
         .label {{ font-weight: bold; color: #555; }}
         .value {{ font-size: 1.1em; font-weight: bold; }}
         .reason-list li {{ background-color: #eef; border-left-color: #778beb; }}
+        .price-change {{ font-size: 1.2em; font-weight: bold; color: {color}; }}
     </style></head><body>
         <div class="container">
-            <div class="header"><h1>Athena Eye - V2 智能博弈警报</h1></div>
+            <div class="header"><h1>Athena Eye - V3 股价变动警报</h1></div>
             <div class="section">
                 <h2>{ticker} — {alert_type}</h2>
                 <p><strong>核心判断:</strong> {alert_details.get('reason', 'N/A')}</p>
             </div>
             <div class="section">
-                <h3>三维分析详情:</h3>
+                <h3>股价与情绪分析详情:</h3>
                 <ul>
-                    <li><span class="label">价格动态 (K线周期: {settings.PRICE_DATA_INTERVAL})</span> <span class="value">{price_details.get('change_percent', 0)}%</span></li>
-                    <li><span class="label">成交量放大倍数</span> <span class="value">{volume_details.get('multiplier', 0)}x</span></li>
+                    <li><span class="label">股价变动 (K线周期: {settings.PRICE_DATA_INTERVAL})</span> <span class="value price-change">{price_details.get('change_percent', 0):+.2f}%</span></li>
+                    <li><span class="label">开盘价</span> <span class="value">${price_details.get('open', 0):.2f}</span></li>
+                    <li><span class="label">收盘价</span> <span class="value">${price_details.get('close', 0):.2f}</span></li>
                     <li><span class="label">市场情绪评分</span> <span class="value">{sentiment_details.get('sentiment_score', 5)}/10</span></li>
+                    <li><span class="label">成交量倍数</span> <span class="value">{volume_details.get('multiplier', 0):.1f}x</span></li>
                 </ul>
             </div>
             <div class="section reason-list">
@@ -92,13 +99,13 @@ def run_monitor_cycle():
         
         # --- 第二步：事件驱动判断 ---
         if volume_result:
-            logger.info(f"为 {ticker} 检测到量价异动，启动深度分析...")
+            logger.info(f"为 {ticker} 检测到股价变动，启动深度分析...")
             
-            # 只有在异动发生时，才进行新闻获取和情绪分析
+            # 只有在股价变动发生时，才进行新闻获取和情绪分析
             news_data = data_fetcher.get_news(ticker)
             sentiment_result = sentiment_analyzer.analyze_news_sentiment(ticker, news_data)
             
-            # 将所有信息送入决策引擎
+            # 将所有信息送入决策引擎（参数名已更新）
             alert = decision_engine.decide(ticker, volume_result, sentiment_result)
             
             if alert:
@@ -110,8 +117,8 @@ def run_monitor_cycle():
                 finally:
                     db.close()
                 
-                subject = f"【Athena Eye V2 警报】{ticker}: {alert['alert_type']}"
-                body = format_alert_email_v2(alert) # format_alert_email_v2需要完整定义
+                subject = f"【Athena Eye V3 警报】{ticker}: {alert['alert_type']}"
+                body = format_alert_email_v3(alert)
                 email_client.send_email(subject, body)
             else:
                 logger.info(f"对 {ticker} 的深度分析未触发警-报。")
