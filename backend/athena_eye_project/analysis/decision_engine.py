@@ -69,8 +69,15 @@ class DecisionEngineV2:
             alert_reason = f"价格下跌但市场情绪积极 ({sentiment.get('sentiment_score')}/10)。可能是主力利用恐慌打压价格，以吸取廉价筹码。"
 
         else:
-            logger.info(f"为 {ticker} 检测到巨量，但价格/情绪组合信号不明确({price_change=}, {sentiment.get('overall_sentiment')})，暂不触发警报。")
-            return None
+            # 只要走到了这里，就说明有量价异动，但组合不明确
+            # 我们不再返回None，而是创建一个通用的警报
+            logger.info(f"为 {ticker} 检测到巨量，但价格/情绪组合信号不明确，生成中性观察警报。")
+            alert_type = "量价异动（中性观察）"
+            alert_reason = (
+                f"检测到成交量显著放大，但价格变动 ({price_change}%) 或 "
+                f"市场情绪 ({sentiment.get('overall_sentiment')}, {sentiment.get('sentiment_score')}/10) "
+                f"未形成明确的多空信号。建议密切关注。"
+            )
 
         # 组装警报
         alert_details = {
